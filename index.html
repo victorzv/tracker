@@ -1,0 +1,1848 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ходьба">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Интервальная ходьба</title>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""/>
+
+<!-- Google Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+/* ════════════════════════════════════════════════
+   БАЗА И СБРОС
+   ════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  height: 100%;
+  background: #0a0a0a;
+  color: #f5f5f5;
+  font-family: 'Space Mono', ui-monospace, SFMono-Regular, monospace;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+h1, h2, h3 { font-family: 'Unbounded', system-ui, sans-serif; font-weight: 600; margin: 0; }
+button { font-family: inherit; cursor: pointer; -webkit-appearance: none; appearance: none; }
+input, select { font-family: inherit; }
+
+/* ════════════════════════════════════════════════
+   ЭКРАНЫ — переключение
+   ════════════════════════════════════════════════ */
+.screen {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.screen.active { display: flex; }
+
+/* ════════════════════════════════════════════════
+   ОБЩИЕ ЭЛЕМЕНТЫ
+   ════════════════════════════════════════════════ */
+.app-header {
+  padding: 24px 20px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.app-title {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.btn {
+  border: none;
+  background: #141414;
+  color: #f5f5f5;
+  padding: 14px 18px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  min-height: 52px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px;
+  border: 1px solid #2a2a2a;
+  transition: transform .08s ease, background .15s ease, border-color .15s ease;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary {
+  background: #00ff87;
+  color: #0a0a0a;
+  border-color: #00ff87;
+  font-family: 'Unbounded', system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+.btn-primary:active { background: #00e078; }
+.btn-danger {
+  background: #1f0e0e;
+  color: #ff6b6b;
+  border-color: #4a1d1d;
+}
+.btn-ghost { background: transparent; }
+.btn-block { width: 100%; }
+.btn-icon {
+  width: 44px; height: 44px; min-height: 44px;
+  padding: 0; border-radius: 12px;
+  font-size: 20px;
+}
+.btn[disabled] { opacity: .4; pointer-events: none; }
+
+.card {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 18px;
+  padding: 16px;
+}
+
+/* ════════════════════════════════════════════════
+   ЭКРАН 1: ГЛАВНЫЙ / ИСТОРИЯ
+   ════════════════════════════════════════════════ */
+#screen-home { padding-bottom: 24px; }
+.home-content {
+  flex: 1;
+  padding: 0 20px 20px;
+  overflow-y: auto;
+}
+.history-list {
+  display: flex; flex-direction: column; gap: 12px;
+  margin-top: 16px;
+}
+.walk-item {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.walk-item-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+}
+.walk-item-name {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+}
+.walk-item-date {
+  color: #888;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.walk-item-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  font-size: 13px;
+}
+.walk-item-stat {
+  background: #0a0a0a;
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.walk-item-stat-label {
+  color: #888;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.walk-item-stat-value {
+  color: #f5f5f5;
+  font-weight: 700;
+  font-size: 14px;
+  margin-top: 2px;
+}
+.walk-item-actions {
+  display: flex; gap: 8px;
+}
+.walk-item-actions .btn { flex: 1; min-height: 44px; padding: 10px 12px; font-size: 13px; }
+
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 48px 20px;
+  color: #888;
+}
+.empty-state-icon {
+  font-size: 64px; margin-bottom: 16px;
+  filter: grayscale(.5);
+}
+.empty-state-text {
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 280px;
+}
+
+.fab-area {
+  padding: 16px 20px;
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(to top, #0a0a0a 70%, transparent);
+}
+
+/* ════════════════════════════════════════════════
+   ЭКРАН 2: НАСТРОЙКИ
+   ════════════════════════════════════════════════ */
+#screen-settings { padding-bottom: 24px; }
+.settings-content {
+  flex: 1;
+  padding: 0 20px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.section-title {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+  margin: 8px 0 4px;
+}
+.field {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.field-label {
+  font-size: 14px; color: #ccc;
+}
+.field-hint {
+  font-size: 12px; color: #888; line-height: 1.4;
+}
+.text-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  color: #f5f5f5;
+  font-size: 15px;
+  font-family: 'Space Mono', monospace;
+}
+.text-input:focus { outline: none; border-color: #00ff87; }
+
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.toggle {
+  position: relative;
+  width: 52px; height: 30px;
+  background: #2a2a2a;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .2s ease;
+  flex-shrink: 0;
+}
+.toggle::before {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 24px; height: 24px;
+  background: #f5f5f5;
+  border-radius: 50%;
+  transition: transform .2s ease;
+}
+.toggle.on { background: #00ff87; }
+.toggle.on::before { transform: translateX(22px); background: #0a0a0a; }
+
+.stepper {
+  display: flex; align-items: center; gap: 12px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 4px;
+}
+.stepper-btn {
+  width: 44px; height: 44px;
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  color: #f5f5f5;
+  font-size: 22px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.stepper-value {
+  flex: 1; text-align: center;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.lang-tabs {
+  display: flex; gap: 8px;
+}
+.lang-tab {
+  flex: 1;
+  padding: 12px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  color: #ccc;
+  font-size: 14px;
+  font-weight: 700;
+}
+.lang-tab.active {
+  background: #00ff87;
+  color: #0a0a0a;
+  border-color: #00ff87;
+}
+
+.slider-row {
+  display: flex; align-items: center; gap: 12px;
+}
+.slider {
+  flex: 1;
+  -webkit-appearance: none; appearance: none;
+  height: 6px;
+  background: #2a2a2a;
+  border-radius: 999px;
+  outline: none;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: #00ff87;
+  cursor: pointer;
+}
+.slider::-moz-range-thumb {
+  width: 22px; height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: #00ff87;
+  cursor: pointer;
+}
+.slider-value {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  min-width: 48px;
+  text-align: right;
+  color: #00ff87;
+}
+
+/* ════════════════════════════════════════════════
+   ЭКРАН 3: АКТИВНАЯ ПРОГУЛКА
+   ════════════════════════════════════════════════ */
+#screen-active {
+  padding: 0;
+  overflow: hidden;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+}
+.active-map {
+  flex: 0 0 40%;
+  position: relative;
+  background: #1a1a1a;
+}
+#map-active { width: 100%; height: 100%; }
+.map-recenter {
+  position: absolute;
+  bottom: 12px; right: 12px;
+  z-index: 401;
+  width: 44px; height: 44px;
+  background: #141414;
+  color: #00ff87;
+  border: 1px solid #2a2a2a;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.5);
+}
+.gps-warning {
+  position: absolute;
+  top: 12px; left: 12px; right: 12px;
+  z-index: 401;
+  background: rgba(255, 107, 107, 0.95);
+  color: #0a0a0a;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 13px;
+  text-align: center;
+  display: none;
+}
+.gps-warning.show { display: block; }
+
+.active-stats {
+  flex: 1;
+  background: #0a0a0a;
+  display: flex; flex-direction: column;
+  padding: 14px 16px 16px;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.pace-banner {
+  border-radius: 18px;
+  padding: 16px 20px;
+  text-align: center;
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 32px;
+  letter-spacing: 0.05em;
+  color: #0a0a0a;
+  transition: background-color .4s ease;
+  box-shadow: 0 6px 20px rgba(0,0,0,.4);
+}
+.pace-banner.fast { background: #00ff87; }
+.pace-banner.slow { background: #4f9cf9; }
+.pace-banner-sub {
+  display: block;
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 4px;
+  opacity: .8;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.metric {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+}
+.metric-value {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 26px;
+  color: #f5f5f5;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.metric-unit { font-size: 13px; color: #888; font-weight: 400; }
+
+.progress-block {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.progress-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+}
+.progress-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+}
+.progress-counter {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700;
+  font-size: 13px;
+  color: #00ff87;
+}
+.progress-bar {
+  height: 8px;
+  background: #2a2a2a;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00ff87, #4f9cf9);
+  width: 0%;
+  transition: width .3s ease, background .4s ease;
+  border-radius: 999px;
+}
+.progress-fill.fast { background: #00ff87; }
+.progress-fill.slow { background: #4f9cf9; }
+
+.active-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: auto;
+}
+.active-controls .btn { min-height: 56px; font-size: 14px; }
+
+/* Анимация пульсации точки на карте */
+.pulse-marker {
+  position: relative;
+  width: 18px; height: 18px;
+}
+.pulse-marker .core {
+  position: absolute;
+  inset: 0;
+  background: #4f9cf9;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(0,0,0,.5);
+  z-index: 2;
+}
+.pulse-marker::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: rgba(79, 156, 249, 0.45);
+  animation: pulseRing 1.6s ease-out infinite;
+}
+@keyframes pulseRing {
+  0%   { transform: scale(0.5); opacity: 0.9; }
+  80%  { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* ════════════════════════════════════════════════
+   ЭКРАН 4: ПРОСМОТР ИСТОРИИ
+   ════════════════════════════════════════════════ */
+#screen-view {
+  padding: 0;
+  height: 100vh;
+  height: 100dvh;
+  position: relative;
+  overflow: hidden;
+}
+#map-view { width: 100%; height: 100%; }
+.view-back {
+  position: absolute;
+  top: 16px; left: 16px;
+  z-index: 401;
+  padding: 10px 14px;
+  background: rgba(20,20,20,0.92);
+  color: #f5f5f5;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+.view-info {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 16px;
+  z-index: 401;
+  background: rgba(20,20,20,0.95);
+  border: 1px solid #2a2a2a;
+  border-radius: 18px;
+  padding: 14px 16px;
+  backdrop-filter: blur(8px);
+}
+.view-info-name {
+  font-family: 'Unbounded', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+.view-info-date { font-size: 12px; color: #888; margin-bottom: 12px; }
+.view-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.view-info-grid .metric { padding: 10px 12px; }
+.view-info-grid .metric-value { font-size: 20px; }
+
+.speed-chart {
+  margin-top: 12px;
+  width: 100%;
+  height: 60px;
+}
+
+/* ════════════════════════════════════════════════
+   ТОСТ / СООБЩЕНИЯ
+   ════════════════════════════════════════════════ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 80px;
+  transform: translateX(-50%) translateY(20px);
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  color: #f5f5f5;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+  max-width: 90vw;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Модалка подтверждения */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 9998;
+  padding: 20px;
+}
+.modal-backdrop.show { display: flex; }
+.modal {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 18px;
+  padding: 20px;
+  max-width: 360px;
+  width: 100%;
+}
+.modal h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.modal p {
+  font-size: 14px;
+  color: #ccc;
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.modal-actions {
+  display: flex; gap: 8px;
+}
+.modal-actions .btn { flex: 1; }
+
+/* Лёгкая анимация появления экранов */
+.screen.active {
+  animation: fadeIn .2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Чтобы Leaflet attribution выглядел читаемо в темной теме */
+.leaflet-container { background: #1a1a1a !important; }
+.leaflet-control-attribution {
+  background: rgba(20,20,20,0.85) !important;
+  color: #888 !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a { color: #4f9cf9 !important; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     ЭКРАН 1: ГЛАВНЫЙ / ИСТОРИЯ
+     ═══════════════════════════════════════════════ -->
+<section class="screen active" id="screen-home">
+  <header class="app-header">
+    <h1 class="app-title">Интервальная<br>ходьба</h1>
+  </header>
+  <div class="home-content">
+    <div id="history-container"></div>
+  </div>
+  <div class="fab-area">
+    <button class="btn btn-primary btn-block" id="btn-new-walk">+ Новая прогулка</button>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════
+     ЭКРАН 2: НАСТРОЙКИ ПРОГУЛКИ
+     ═══════════════════════════════════════════════ -->
+<section class="screen" id="screen-settings">
+  <header class="app-header">
+    <button class="btn btn-ghost btn-icon" id="btn-back-from-settings">←</button>
+    <h2 class="app-title">Настройки</h2>
+    <span style="width:44px"></span>
+  </header>
+
+  <div class="settings-content">
+    <div class="card">
+      <div class="field">
+        <label class="field-label" for="walk-name">Название прогулки</label>
+        <input type="text" id="walk-name" class="text-input" maxlength="40" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="section-title">Интервальный режим</div>
+    <div class="card">
+      <div class="toggle-row">
+        <div>
+          <div class="field-label">Включить интервальный режим</div>
+          <div class="field-hint">Чередование быстрой и медленной ходьбы</div>
+        </div>
+        <div class="toggle on" id="toggle-interval"></div>
+      </div>
+      <div id="interval-config" style="margin-top:16px;">
+        <div class="field">
+          <label class="field-label">Интервал смены темпа</label>
+          <div class="stepper">
+            <button class="stepper-btn" id="interval-minus">−</button>
+            <div class="stepper-value"><span id="interval-meters-val">200</span> м</div>
+            <button class="stepper-btn" id="interval-plus">+</button>
+          </div>
+          <div class="field-hint">Каждые <span id="interval-hint-val">200</span> метров — смена темпа: БЫСТРО → МЕДЛЕННО → БЫСТРО…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Голос</div>
+    <div class="card">
+      <div class="toggle-row">
+        <div class="field-label">Голосовые команды</div>
+        <div class="toggle on" id="toggle-voice"></div>
+      </div>
+      <div id="voice-config" style="margin-top:14px;">
+        <div class="field">
+          <div class="field-label">Язык команд</div>
+          <div class="lang-tabs">
+            <button class="lang-tab active" data-lang="ru">Русский</button>
+            <button class="lang-tab" data-lang="en">English</button>
+          </div>
+          <div class="field-hint" id="voice-example">«Быстро!» / «Медленно!»</div>
+        </div>
+        <div class="field" style="margin-top:14px;">
+          <div class="field-label">Громкость речи</div>
+          <div class="slider-row">
+            <input type="range" min="0" max="100" value="80" class="slider" id="voice-volume">
+            <span class="slider-value"><span id="voice-volume-val">80</span>%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Звук</div>
+    <div class="card">
+      <div class="toggle-row">
+        <div>
+          <div class="field-label">Звуковой сигнал при смене</div>
+          <div class="field-hint">Дополнительно к голосу</div>
+        </div>
+        <div class="toggle on" id="toggle-beep"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fab-area">
+    <button class="btn btn-primary btn-block" id="btn-start-walk">Начать прогулку</button>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════
+     ЭКРАН 3: АКТИВНАЯ ПРОГУЛКА
+     ═══════════════════════════════════════════════ -->
+<section class="screen" id="screen-active">
+  <div class="active-map">
+    <div id="map-active"></div>
+    <div class="gps-warning" id="gps-warning">Нет GPS сигнала — ставлю на паузу…</div>
+    <button class="map-recenter" id="btn-recenter" title="Центрировать карту">⊕</button>
+  </div>
+  <div class="active-stats">
+    <div class="pace-banner fast" id="pace-banner" style="display:none;">
+      БЫСТРО
+      <span class="pace-banner-sub" id="pace-banner-sub">Темп №1</span>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric">
+        <div class="metric-label">Дистанция</div>
+        <div class="metric-value"><span id="m-distance">0</span> <span class="metric-unit" id="m-distance-unit">м</span></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Время</div>
+        <div class="metric-value" id="m-time">00:00</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Скорость</div>
+        <div class="metric-value"><span id="m-speed">0.0</span> <span class="metric-unit">км/ч</span></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Средняя</div>
+        <div class="metric-value"><span id="m-avg-speed">0.0</span> <span class="metric-unit">км/ч</span></div>
+      </div>
+    </div>
+
+    <div class="progress-block" id="progress-block" style="display:none;">
+      <div class="progress-row">
+        <span class="progress-label">До смены темпа</span>
+        <span class="progress-counter"><span id="p-remaining">200</span> м</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill fast" id="progress-fill"></div></div>
+      <div class="progress-row" style="margin-top:8px; margin-bottom:0;">
+        <span class="progress-label">Смен темпа</span>
+        <span class="progress-counter"><span id="p-switches">0</span></span>
+      </div>
+    </div>
+
+    <div class="active-controls">
+      <button class="btn" id="btn-pause">⏸ Пауза</button>
+      <button class="btn btn-danger" id="btn-finish">Завершить</button>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════
+     ЭКРАН 4: ПРОСМОТР ПРОГУЛКИ
+     ═══════════════════════════════════════════════ -->
+<section class="screen" id="screen-view">
+  <div id="map-view"></div>
+  <button class="view-back" id="btn-back-from-view">← Назад</button>
+  <div class="view-info">
+    <div class="view-info-name" id="view-name">Прогулка</div>
+    <div class="view-info-date" id="view-date"></div>
+    <div class="view-info-grid">
+      <div class="metric">
+        <div class="metric-label">Дистанция</div>
+        <div class="metric-value"><span id="view-distance">0</span> <span class="metric-unit" id="view-distance-unit">м</span></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Время</div>
+        <div class="metric-value" id="view-time">00:00</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Средняя</div>
+        <div class="metric-value"><span id="view-avg">0.0</span> <span class="metric-unit">км/ч</span></div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Макс</div>
+        <div class="metric-value"><span id="view-max">0.0</span> <span class="metric-unit">км/ч</span></div>
+      </div>
+    </div>
+    <svg class="speed-chart" id="speed-chart" viewBox="0 0 300 60" preserveAspectRatio="none"></svg>
+    <button class="btn btn-block" id="btn-export-gpx" style="margin-top:10px;">Экспорт в GPX</button>
+  </div>
+</section>
+
+<!-- Тост и модалка -->
+<div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="modal">
+  <div class="modal">
+    <h3 id="modal-title">Подтверждение</h3>
+    <p id="modal-text">Завершить прогулку?</p>
+    <div class="modal-actions">
+      <button class="btn" id="modal-cancel">Отмена</button>
+      <button class="btn btn-primary" id="modal-ok">ОК</button>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   РЕГИСТРАЦИЯ SERVICE WORKER
+   ═══════════════════════════════════════════════════════════════ */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW reg failed', err));
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+   ═══════════════════════════════════════════════════════════════ */
+const STORAGE_HISTORY = 'walks_history';
+const STORAGE_SETTINGS = 'walk_settings';
+
+const state = {
+  // Настройки текущей прогулки
+  settings: loadSettings(),
+  // Активная прогулка
+  walk: null,            // объект, см. ниже
+  watchId: null,
+  wakeLock: null,
+  paused: false,
+  pauseStartedAt: 0,
+  pausedAccum: 0,        // суммарное время на паузе (мс)
+  startTime: 0,
+  timerInterval: null,
+  audioCtx: null,
+  // Карта активной прогулки
+  map: null,
+  mapCentered: true,     // авто-центрирование
+  trackPolyline: null,
+  positionMarker: null,
+  // Просмотр истории
+  viewMap: null,
+  // GPS
+  lastFixTime: 0,
+  gpsWarningShown: false,
+  // Просматриваемая прогулка
+  viewingWalk: null
+};
+
+/* Дефолтные настройки */
+function defaultSettings() {
+  return {
+    name: '',
+    intervalMode: true,
+    intervalMeters: 200,
+    voiceEnabled: true,
+    voiceLang: 'ru',
+    voiceVolume: 80,
+    beepEnabled: true
+  };
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(STORAGE_SETTINGS);
+    if (!raw) return defaultSettings();
+    return Object.assign(defaultSettings(), JSON.parse(raw));
+  } catch (e) {
+    return defaultSettings();
+  }
+}
+
+function saveSettings() {
+  try { localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(state.settings)); } catch (e) {}
+}
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(STORAGE_HISTORY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
+}
+
+function saveHistory(arr) {
+  try { localStorage.setItem(STORAGE_HISTORY, JSON.stringify(arr)); } catch (e) {
+    showToast('Не удалось сохранить — память переполнена');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   НАВИГАЦИЯ МЕЖДУ ЭКРАНАМИ
+   ═══════════════════════════════════════════════════════════════ */
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  // Leaflet нужно invalidateSize при показе
+  setTimeout(() => {
+    if (id === 'screen-active' && state.map) state.map.invalidateSize();
+    if (id === 'screen-view' && state.viewMap) state.viewMap.invalidateSize();
+  }, 60);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   УТИЛИТЫ
+   ═══════════════════════════════════════════════════════════════ */
+function showToast(text, ms = 2400) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+function confirmModal(title, text) {
+  return new Promise((resolve) => {
+    const m = document.getElementById('modal');
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-text').textContent = text;
+    m.classList.add('show');
+    const ok = document.getElementById('modal-ok');
+    const cancel = document.getElementById('modal-cancel');
+    function cleanup(v) {
+      m.classList.remove('show');
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
+      resolve(v);
+    }
+    function onOk() { cleanup(true); }
+    function onCancel() { cleanup(false); }
+    ok.addEventListener('click', onOk);
+    cancel.addEventListener('click', onCancel);
+  });
+}
+
+/* Формула Haversine — расстояние в метрах между двумя GPS-точками */
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const f1 = toRad(lat1), f2 = toRad(lat2);
+  const df = toRad(lat2 - lat1);
+  const dl = toRad(lon2 - lon1);
+  const a = Math.sin(df / 2) ** 2 + Math.cos(f1) * Math.cos(f2) * Math.sin(dl / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatDistance(m) {
+  if (m >= 1000) return { val: (m / 1000).toFixed(2), unit: 'км' };
+  return { val: Math.round(m).toString(), unit: 'м' };
+}
+function formatTime(seconds) {
+  seconds = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const pad = n => n.toString().padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString('ru-RU', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch (e) { return iso; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЭКРАН 1 — ИСТОРИЯ
+   ═══════════════════════════════════════════════════════════════ */
+function renderHistory() {
+  const container = document.getElementById('history-container');
+  const history = loadHistory().slice().reverse(); // свежие сверху
+
+  if (history.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">🚶</div>
+        <div class="empty-state-text">Пока нет прогулок.<br>Нажмите «Новая прогулка», чтобы начать.</div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = '<div class="history-list">' + history.map(walk => {
+    const dist = formatDistance(walk.stats.totalDistance);
+    return `
+      <div class="walk-item" data-id="${walk.id}">
+        <div class="walk-item-head">
+          <div>
+            <div class="walk-item-name">${escapeHtml(walk.name)}</div>
+            <div class="walk-item-date">${formatDate(walk.date)}</div>
+          </div>
+        </div>
+        <div class="walk-item-stats">
+          <div class="walk-item-stat">
+            <div class="walk-item-stat-label">Дистанция</div>
+            <div class="walk-item-stat-value">${dist.val} ${dist.unit}</div>
+          </div>
+          <div class="walk-item-stat">
+            <div class="walk-item-stat-label">Время</div>
+            <div class="walk-item-stat-value">${formatTime(walk.stats.duration)}</div>
+          </div>
+          <div class="walk-item-stat">
+            <div class="walk-item-stat-label">Средняя</div>
+            <div class="walk-item-stat-value">${walk.stats.avgSpeed.toFixed(1)} км/ч</div>
+          </div>
+        </div>
+        <div class="walk-item-actions">
+          <button class="btn" data-action="map" data-id="${walk.id}">🗺 Карта</button>
+          <button class="btn btn-danger" data-action="delete" data-id="${walk.id}">Удалить</button>
+        </div>
+      </div>
+    `;
+  }).join('') + '</div>';
+
+  // Слушатели на кнопки
+  container.querySelectorAll('button[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.id, 10);
+      const action = btn.dataset.action;
+      if (action === 'map') openWalkView(id);
+      else if (action === 'delete') deleteWalk(id);
+    });
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+async function deleteWalk(id) {
+  const ok = await confirmModal('Удалить прогулку?', 'Действие нельзя отменить.');
+  if (!ok) return;
+  const history = loadHistory().filter(w => w.id !== id);
+  saveHistory(history);
+  renderHistory();
+  showToast('Прогулка удалена');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЭКРАН 2 — НАСТРОЙКИ
+   ═══════════════════════════════════════════════════════════════ */
+function nextWalkNumber() {
+  const history = loadHistory();
+  const max = history.reduce((m, w) => Math.max(m, w.id || 0), 0);
+  return max + 1;
+}
+
+function openSettings() {
+  // подставляем дефолтное название
+  const num = nextWalkNumber();
+  const defaultName = `Прогулка ${num}`;
+  document.getElementById('walk-name').value = state.settings.name || defaultName;
+  state.settings.name = document.getElementById('walk-name').value;
+
+  // Тогглы
+  setToggle('toggle-interval', state.settings.intervalMode);
+  setToggle('toggle-voice', state.settings.voiceEnabled);
+  setToggle('toggle-beep', state.settings.beepEnabled);
+
+  // Метры интервала
+  document.getElementById('interval-meters-val').textContent = state.settings.intervalMeters;
+  document.getElementById('interval-hint-val').textContent = state.settings.intervalMeters;
+
+  // Язык
+  document.querySelectorAll('.lang-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.lang === state.settings.voiceLang);
+  });
+  updateVoiceExample();
+
+  // Громкость
+  document.getElementById('voice-volume').value = state.settings.voiceVolume;
+  document.getElementById('voice-volume-val').textContent = state.settings.voiceVolume;
+
+  // Видимость подсекций
+  document.getElementById('interval-config').style.display = state.settings.intervalMode ? '' : 'none';
+  document.getElementById('voice-config').style.display = state.settings.voiceEnabled ? '' : 'none';
+
+  showScreen('screen-settings');
+}
+
+function setToggle(id, on) {
+  document.getElementById(id).classList.toggle('on', !!on);
+}
+
+function updateVoiceExample() {
+  const lang = state.settings.voiceLang;
+  document.getElementById('voice-example').textContent =
+    lang === 'ru' ? '«Быстро!» / «Медленно!»' : '"Fast!" / "Slow!"';
+}
+
+/* Биндинг настроек */
+function bindSettings() {
+  document.getElementById('walk-name').addEventListener('input', e => {
+    state.settings.name = e.target.value.trim();
+  });
+
+  // Интервальный режим
+  document.getElementById('toggle-interval').addEventListener('click', () => {
+    state.settings.intervalMode = !state.settings.intervalMode;
+    setToggle('toggle-interval', state.settings.intervalMode);
+    document.getElementById('interval-config').style.display = state.settings.intervalMode ? '' : 'none';
+  });
+
+  document.getElementById('interval-minus').addEventListener('click', () => {
+    state.settings.intervalMeters = Math.max(50, state.settings.intervalMeters - 50);
+    document.getElementById('interval-meters-val').textContent = state.settings.intervalMeters;
+    document.getElementById('interval-hint-val').textContent = state.settings.intervalMeters;
+  });
+  document.getElementById('interval-plus').addEventListener('click', () => {
+    state.settings.intervalMeters = Math.min(2000, state.settings.intervalMeters + 50);
+    document.getElementById('interval-meters-val').textContent = state.settings.intervalMeters;
+    document.getElementById('interval-hint-val').textContent = state.settings.intervalMeters;
+  });
+
+  // Голос
+  document.getElementById('toggle-voice').addEventListener('click', () => {
+    state.settings.voiceEnabled = !state.settings.voiceEnabled;
+    setToggle('toggle-voice', state.settings.voiceEnabled);
+    document.getElementById('voice-config').style.display = state.settings.voiceEnabled ? '' : 'none';
+  });
+  document.querySelectorAll('.lang-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      state.settings.voiceLang = tab.dataset.lang;
+      document.querySelectorAll('.lang-tab').forEach(t => t.classList.toggle('active', t === tab));
+      updateVoiceExample();
+    });
+  });
+  document.getElementById('voice-volume').addEventListener('input', e => {
+    state.settings.voiceVolume = parseInt(e.target.value, 10);
+    document.getElementById('voice-volume-val').textContent = state.settings.voiceVolume;
+  });
+
+  // Звук
+  document.getElementById('toggle-beep').addEventListener('click', () => {
+    state.settings.beepEnabled = !state.settings.beepEnabled;
+    setToggle('toggle-beep', state.settings.beepEnabled);
+  });
+
+  // Кнопки
+  document.getElementById('btn-back-from-settings').addEventListener('click', () => {
+    saveSettings();
+    showScreen('screen-home');
+  });
+  document.getElementById('btn-start-walk').addEventListener('click', () => {
+    saveSettings();
+    startWalk();
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЭКРАН 3 — АКТИВНАЯ ПРОГУЛКА: запуск, GPS, карта
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Создаём пустую структуру прогулки */
+function createWalkObject() {
+  return {
+    id: nextWalkNumber(),
+    name: state.settings.name || `Прогулка ${nextWalkNumber()}`,
+    date: new Date().toISOString(),
+    settings: {
+      intervalMode: state.settings.intervalMode,
+      intervalMeters: state.settings.intervalMeters,
+      voiceEnabled: state.settings.voiceEnabled,
+      voiceLang: state.settings.voiceLang
+    },
+    stats: {
+      totalDistance: 0,
+      duration: 0,
+      avgSpeed: 0,
+      maxSpeed: 0
+    },
+    track: [],          // [[lat, lon], ...] — сохранённые точки (раз в ~10м)
+    rawTrack: [],       // все принятые точки {lat, lon, t, speed} — в памяти, для расчётов
+    speedSamples: [],   // [[t, speedKmh], ...] для графика
+    pace: 'fast',
+    distanceSinceLastSwitch: 0,
+    switches: 0,
+    lastSavedTrackPoint: null
+  };
+}
+
+async function startWalk() {
+  if (!('geolocation' in navigator)) {
+    showToast('Геолокация недоступна на этом устройстве');
+    return;
+  }
+
+  state.walk = createWalkObject();
+  state.startTime = Date.now();
+  state.pausedAccum = 0;
+  state.paused = false;
+  state.lastFixTime = 0;
+  state.gpsWarningShown = false;
+
+  // Показываем экран
+  showScreen('screen-active');
+  initActiveMap();
+
+  // UI: режим
+  const banner = document.getElementById('pace-banner');
+  const progressBlock = document.getElementById('progress-block');
+  if (state.walk.settings.intervalMode) {
+    banner.style.display = '';
+    progressBlock.style.display = '';
+    setPaceUI('fast');
+  } else {
+    banner.style.display = 'none';
+    progressBlock.style.display = 'none';
+  }
+
+  // Wake Lock — не даём экрану гаснуть
+  await acquireWakeLock();
+
+  // Запускаем геолокацию
+  state.watchId = navigator.geolocation.watchPosition(
+    onPositionUpdate,
+    onPositionError,
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
+
+  // Таймер обновления времени
+  state.timerInterval = setInterval(updateTimerUI, 500);
+
+  // Лёгкий "хвост" — проверяем потерю GPS каждые 4с
+  state.gpsCheckInterval = setInterval(checkGpsAlive, 4000);
+}
+
+function initActiveMap() {
+  if (state.map) {
+    state.map.remove();
+    state.map = null;
+  }
+  state.map = L.map('map-active', {
+    zoomControl: false,
+    attributionControl: true,
+    preferCanvas: true
+  }).setView([55.751244, 37.618423], 16); // Москва как заглушка
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(state.map);
+
+  // Полилиния трека
+  state.trackPolyline = L.polyline([], {
+    color: '#00ff87',
+    weight: 5,
+    opacity: 0.9,
+    lineCap: 'round',
+    lineJoin: 'round'
+  }).addTo(state.map);
+
+  // Маркер позиции — пульсирующая точка через DivIcon
+  const icon = L.divIcon({
+    className: '',
+    html: '<div class="pulse-marker"><div class="core"></div></div>',
+    iconSize: [18, 18],
+    iconAnchor: [9, 9]
+  });
+  state.positionMarker = L.marker([55.751244, 37.618423], { icon }).addTo(state.map);
+
+  state.mapCentered = true;
+  // Если пользователь сам сдвинул карту — отключаем авто-центр
+  state.map.on('dragstart', () => { state.mapCentered = false; });
+  state.map.on('zoomstart', (e) => {
+    // зум вручную (по жесту) — отключаем авто-центрирование
+    if (e.originalEvent) state.mapCentered = false;
+  });
+}
+
+/* Обновление позиции — главная функция */
+function onPositionUpdate(pos) {
+  if (state.paused) return;
+
+  state.lastFixTime = Date.now();
+  hideGpsWarning();
+
+  const { latitude: lat, longitude: lon, accuracy, speed: rawSpeed } = pos.coords;
+  const t = pos.timestamp || Date.now();
+
+  // Фильтр шума: точность хуже 30м
+  if (accuracy != null && accuracy > 30) return;
+
+  const walk = state.walk;
+  const last = walk.rawTrack.length > 0 ? walk.rawTrack[walk.rawTrack.length - 1] : null;
+
+  if (last) {
+    const delta = haversine(last.lat, last.lon, lat, lon);
+    const dt = (t - last.t) / 1000;
+
+    // Скорость по координатам
+    const speedMs = dt > 0 ? delta / dt : 0;
+    const speedKmh = speedMs * 3.6;
+
+    // Фильтр: GPS прыгнул (скорость > 25 км/ч)
+    if (speedKmh > 25) return;
+    // Фильтр: стоим на месте (< 2м)
+    if (delta < 2) return;
+
+    // Сохраняем точку
+    walk.rawTrack.push({ lat, lon, t, speed: rawSpeed != null ? rawSpeed : speedMs });
+    walk.stats.totalDistance += delta;
+
+    // Интервальный режим
+    if (walk.settings.intervalMode) {
+      walk.distanceSinceLastSwitch += delta;
+      if (walk.distanceSinceLastSwitch >= walk.settings.intervalMeters) {
+        walk.distanceSinceLastSwitch = 0;
+        walk.pace = walk.pace === 'fast' ? 'slow' : 'fast';
+        walk.switches++;
+        announceSwitch(walk.pace);
+        setPaceUI(walk.pace);
+      }
+    }
+
+    // Текущая скорость
+    const curSpeedKmh = (rawSpeed != null && rawSpeed >= 0) ? rawSpeed * 3.6 : speedKmh;
+    if (curSpeedKmh > walk.stats.maxSpeed) walk.stats.maxSpeed = curSpeedKmh;
+    walk.speedSamples.push([t - state.startTime, curSpeedKmh]);
+
+    // Сохраняем точку в trackOptimized раз в 10 метров
+    if (!walk.lastSavedTrackPoint ||
+        haversine(walk.lastSavedTrackPoint.lat, walk.lastSavedTrackPoint.lon, lat, lon) >= 10) {
+      walk.track.push([+lat.toFixed(6), +lon.toFixed(6)]);
+      walk.lastSavedTrackPoint = { lat, lon };
+      // Обновляем линию на карте
+      state.trackPolyline.addLatLng([lat, lon]);
+    }
+
+    // UI метрики
+    updateMetricsUI(curSpeedKmh);
+  } else {
+    // Первая точка
+    walk.rawTrack.push({ lat, lon, t, speed: rawSpeed || 0 });
+    walk.track.push([+lat.toFixed(6), +lon.toFixed(6)]);
+    walk.lastSavedTrackPoint = { lat, lon };
+    state.map.setView([lat, lon], 17);
+  }
+
+  // Маркер и центр
+  state.positionMarker.setLatLng([lat, lon]);
+  if (state.mapCentered) {
+    state.map.panTo([lat, lon], { animate: true, duration: 0.5 });
+  }
+}
+
+function onPositionError(err) {
+  if (err.code === 1) {
+    // PERMISSION_DENIED
+    showToast('Нет доступа к геолокации. Разрешите его в настройках браузера.');
+    cleanupActiveWalk();
+    showScreen('screen-home');
+    renderHistory();
+  } else if (err.code === 2) {
+    showToast('Сигнал GPS потерян');
+    showGpsWarning();
+  } else if (err.code === 3) {
+    showGpsWarning();
+  }
+}
+
+function showGpsWarning() {
+  if (state.gpsWarningShown) return;
+  state.gpsWarningShown = true;
+  document.getElementById('gps-warning').classList.add('show');
+  // Авто-пауза при потере GPS
+  if (!state.paused) togglePause(true);
+}
+function hideGpsWarning() {
+  if (!state.gpsWarningShown) return;
+  state.gpsWarningShown = false;
+  document.getElementById('gps-warning').classList.remove('show');
+}
+function checkGpsAlive() {
+  if (state.paused || !state.lastFixTime) return;
+  // Если фиксов нет 15+ секунд
+  if (Date.now() - state.lastFixTime > 15000) {
+    showGpsWarning();
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UI ОБНОВЛЕНИЕ МЕТРИК
+   ═══════════════════════════════════════════════════════════════ */
+function updateMetricsUI(curSpeedKmh) {
+  const walk = state.walk;
+  if (!walk) return;
+  const dist = formatDistance(walk.stats.totalDistance);
+  document.getElementById('m-distance').textContent = dist.val;
+  document.getElementById('m-distance-unit').textContent = dist.unit;
+
+  const elapsedSec = getElapsedSeconds();
+  const avgKmh = elapsedSec > 0 ? (walk.stats.totalDistance / elapsedSec) * 3.6 : 0;
+  walk.stats.avgSpeed = avgKmh;
+  document.getElementById('m-speed').textContent = (curSpeedKmh || 0).toFixed(1);
+  document.getElementById('m-avg-speed').textContent = avgKmh.toFixed(1);
+
+  // Прогресс-бар
+  if (walk.settings.intervalMode) {
+    const pct = Math.min(100, (walk.distanceSinceLastSwitch / walk.settings.intervalMeters) * 100);
+    const fill = document.getElementById('progress-fill');
+    fill.style.width = pct + '%';
+    fill.classList.toggle('fast', walk.pace === 'fast');
+    fill.classList.toggle('slow', walk.pace === 'slow');
+    const remaining = Math.max(0, walk.settings.intervalMeters - walk.distanceSinceLastSwitch);
+    document.getElementById('p-remaining').textContent = Math.round(remaining);
+    document.getElementById('p-switches').textContent = walk.switches;
+  }
+}
+
+function getElapsedSeconds() {
+  if (!state.startTime) return 0;
+  const now = state.paused ? state.pauseStartedAt : Date.now();
+  return Math.max(0, Math.floor((now - state.startTime - state.pausedAccum) / 1000));
+}
+
+function updateTimerUI() {
+  const sec = getElapsedSeconds();
+  document.getElementById('m-time').textContent = formatTime(sec);
+  if (state.walk) state.walk.stats.duration = sec;
+}
+
+function setPaceUI(pace) {
+  const banner = document.getElementById('pace-banner');
+  banner.classList.toggle('fast', pace === 'fast');
+  banner.classList.toggle('slow', pace === 'slow');
+  banner.firstChild.nodeValue = pace === 'fast' ? 'БЫСТРО' : 'МЕДЛЕННО';
+  document.getElementById('pace-banner-sub').textContent =
+    pace === 'fast' ? 'Идите быстро' : 'Замедлитесь';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ОБЪЯВЛЕНИЕ СМЕНЫ ТЕМПА — звук, голос, вибрация
+   ═══════════════════════════════════════════════════════════════ */
+function announceSwitch(pace) {
+  // 1. Звук
+  if (state.settings.beepEnabled) playTone(pace);
+  // 2. Голос
+  if (state.settings.voiceEnabled) speakPace(pace);
+  // 3. Вибрация
+  if ('vibrate' in navigator) {
+    try {
+      navigator.vibrate(pace === 'fast' ? [120, 80, 120] : [300]);
+    } catch (e) {}
+  }
+}
+
+function getAudioCtx() {
+  if (!state.audioCtx) {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) state.audioCtx = new Ctx();
+    } catch (e) { state.audioCtx = null; }
+  }
+  if (state.audioCtx && state.audioCtx.state === 'suspended') {
+    state.audioCtx.resume().catch(() => {});
+  }
+  return state.audioCtx;
+}
+
+function playTone(pace) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  function beep(freq, start, dur) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0, now + start);
+    gain.gain.linearRampToValueAtTime(0.4, now + start + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + start + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + start);
+    osc.stop(now + start + dur + 0.05);
+  }
+
+  if (pace === 'fast') {
+    // Два коротких высоких
+    beep(880, 0, 0.12);
+    beep(880, 0.18, 0.12);
+  } else {
+    // Один долгий низкий
+    beep(440, 0, 0.5);
+  }
+}
+
+function speakPace(pace) {
+  if (!('speechSynthesis' in window)) return; // graceful fallback
+  try {
+    const phrase = state.settings.voiceLang === 'ru'
+      ? (pace === 'fast' ? 'Быстро!' : 'Медленно!')
+      : (pace === 'fast' ? 'Fast!' : 'Slow!');
+    const u = new SpeechSynthesisUtterance(phrase);
+    u.lang = state.settings.voiceLang === 'ru' ? 'ru-RU' : 'en-US';
+    u.volume = state.settings.voiceVolume / 100;
+    u.rate = 1.0;
+    u.pitch = pace === 'fast' ? 1.1 : 0.9;
+    // Прерываем текущее, чтобы не накапливалось
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WAKE LOCK
+   ═══════════════════════════════════════════════════════════════ */
+async function acquireWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      state.wakeLock = await navigator.wakeLock.request('screen');
+      state.wakeLock.addEventListener('release', () => {
+        state.wakeLock = null;
+      });
+    }
+  } catch (e) {
+    // Не критично — просто экран будет гаснуть
+    console.warn('WakeLock not available', e);
+  }
+}
+async function releaseWakeLock() {
+  try {
+    if (state.wakeLock) await state.wakeLock.release();
+    state.wakeLock = null;
+  } catch (e) {}
+}
+// При возвращении в окно — перезапросить wake lock
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && state.walk && !state.paused) {
+    if (!state.wakeLock) await acquireWakeLock();
+    if (state.map) setTimeout(() => state.map.invalidateSize(), 100);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   ПАУЗА / РЕЦЕНТР / ЗАВЕРШЕНИЕ
+   ═══════════════════════════════════════════════════════════════ */
+function togglePause(forcePause) {
+  const btn = document.getElementById('btn-pause');
+  if (typeof forcePause === 'boolean' ? forcePause : !state.paused) {
+    state.paused = true;
+    state.pauseStartedAt = Date.now();
+    btn.textContent = '▶ Продолжить';
+  } else {
+    if (state.paused) {
+      state.pausedAccum += Date.now() - state.pauseStartedAt;
+    }
+    state.paused = false;
+    state.pauseStartedAt = 0;
+    btn.textContent = '⏸ Пауза';
+  }
+}
+
+function recenterMap() {
+  state.mapCentered = true;
+  const walk = state.walk;
+  if (walk && walk.rawTrack.length > 0) {
+    const last = walk.rawTrack[walk.rawTrack.length - 1];
+    state.map.setView([last.lat, last.lon], state.map.getZoom() < 16 ? 17 : state.map.getZoom(), { animate: true });
+  }
+}
+
+async function finishWalk() {
+  const ok = await confirmModal('Завершить прогулку?', 'Прогулка будет сохранена в историю.');
+  if (!ok) return;
+
+  // Финальные расчёты
+  const walk = state.walk;
+  if (walk) {
+    walk.stats.duration = getElapsedSeconds();
+    walk.stats.avgSpeed = walk.stats.duration > 0
+      ? (walk.stats.totalDistance / walk.stats.duration) * 3.6
+      : 0;
+    walk.stats.totalDistance = Math.round(walk.stats.totalDistance);
+    walk.stats.maxSpeed = +walk.stats.maxSpeed.toFixed(1);
+    walk.stats.avgSpeed = +walk.stats.avgSpeed.toFixed(1);
+
+    // Сохраняем только если был хоть какой-то трек
+    if (walk.track.length >= 2 && walk.stats.totalDistance > 5) {
+      const history = loadHistory();
+      // Чтобы не дублировать сырые поля и не разрастаться:
+      const toSave = {
+        id: walk.id,
+        name: walk.name,
+        date: walk.date,
+        settings: walk.settings,
+        stats: walk.stats,
+        track: walk.track,
+        speedSamples: walk.speedSamples.map(([t, s]) => [Math.round(t / 1000), +s.toFixed(1)]),
+        switches: walk.switches
+      };
+      history.push(toSave);
+      saveHistory(history);
+      showToast('Прогулка сохранена');
+    } else {
+      showToast('Слишком короткая прогулка — не сохранена');
+    }
+  }
+
+  cleanupActiveWalk();
+  renderHistory();
+  showScreen('screen-home');
+}
+
+function cleanupActiveWalk() {
+  if (state.watchId !== null) {
+    navigator.geolocation.clearWatch(state.watchId);
+    state.watchId = null;
+  }
+  if (state.timerInterval) { clearInterval(state.timerInterval); state.timerInterval = null; }
+  if (state.gpsCheckInterval) { clearInterval(state.gpsCheckInterval); state.gpsCheckInterval = null; }
+  releaseWakeLock();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  state.walk = null;
+  state.paused = false;
+  state.pauseStartedAt = 0;
+  state.pausedAccum = 0;
+  state.startTime = 0;
+  hideGpsWarning();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЭКРАН 4 — ПРОСМОТР ПРОГУЛКИ ИЗ ИСТОРИИ
+   ═══════════════════════════════════════════════════════════════ */
+function openWalkView(id) {
+  const walk = loadHistory().find(w => w.id === id);
+  if (!walk) return;
+  state.viewingWalk = walk;
+
+  showScreen('screen-view');
+
+  if (state.viewMap) { state.viewMap.remove(); state.viewMap = null; }
+  state.viewMap = L.map('map-view', { zoomControl: true, preferCanvas: true });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(state.viewMap);
+
+  const track = walk.track || [];
+  if (track.length >= 2) {
+    const poly = L.polyline(track, {
+      color: '#00ff87', weight: 5, opacity: 0.95, lineCap: 'round'
+    }).addTo(state.viewMap);
+
+    // Старт — зелёная, финиш — красная
+    L.circleMarker(track[0], {
+      radius: 8, fillColor: '#00ff87', color: '#0a0a0a', weight: 2, fillOpacity: 1
+    }).addTo(state.viewMap).bindTooltip('Старт');
+    L.circleMarker(track[track.length - 1], {
+      radius: 8, fillColor: '#ff6b6b', color: '#0a0a0a', weight: 2, fillOpacity: 1
+    }).addTo(state.viewMap).bindTooltip('Финиш');
+
+    state.viewMap.fitBounds(poly.getBounds(), { padding: [40, 40] });
+  } else {
+    state.viewMap.setView([55.751244, 37.618423], 13);
+  }
+
+  // Информация
+  const dist = formatDistance(walk.stats.totalDistance);
+  document.getElementById('view-name').textContent = walk.name;
+  document.getElementById('view-date').textContent = formatDate(walk.date);
+  document.getElementById('view-distance').textContent = dist.val;
+  document.getElementById('view-distance-unit').textContent = dist.unit;
+  document.getElementById('view-time').textContent = formatTime(walk.stats.duration);
+  document.getElementById('view-avg').textContent = (walk.stats.avgSpeed || 0).toFixed(1);
+  document.getElementById('view-max').textContent = (walk.stats.maxSpeed || 0).toFixed(1);
+
+  drawSpeedChart(walk.speedSamples || []);
+}
+
+/* Мини-график скорости — простой SVG */
+function drawSpeedChart(samples) {
+  const svg = document.getElementById('speed-chart');
+  svg.innerHTML = '';
+  if (!samples || samples.length < 2) {
+    svg.innerHTML = '<text x="150" y="32" fill="#888" font-size="11" text-anchor="middle">Нет данных скорости</text>';
+    return;
+  }
+  const W = 300, H = 60, P = 4;
+  const xs = samples.map(s => s[0]);
+  const ys = samples.map(s => s[1]);
+  const xMin = xs[0], xMax = xs[xs.length - 1];
+  const yMax = Math.max(1, ...ys);
+  const xRange = Math.max(1, xMax - xMin);
+
+  const points = samples.map(([x, y]) => {
+    const px = P + ((x - xMin) / xRange) * (W - 2 * P);
+    const py = H - P - (y / yMax) * (H - 2 * P);
+    return `${px.toFixed(1)},${py.toFixed(1)}`;
+  }).join(' ');
+
+  // Площадь под графиком + линия
+  const area = `M ${P},${H - P} L ${points.split(' ').join(' L ')} L ${W - P},${H - P} Z`;
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stop-color="#00ff87" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="#00ff87" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${area}" fill="url(#g1)"/>
+    <polyline points="${points}" fill="none" stroke="#00ff87" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  `;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GPX-ЭКСПОРТ
+   ═══════════════════════════════════════════════════════════════ */
+function exportGpx() {
+  const walk = state.viewingWalk;
+  if (!walk || !walk.track || walk.track.length < 2) {
+    showToast('Нет данных трека для экспорта');
+    return;
+  }
+  const date = walk.date;
+  const points = walk.track.map(([lat, lon]) =>
+    `      <trkpt lat="${lat}" lon="${lon}"></trkpt>`
+  ).join('\n');
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="IntervalWalk" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>${escapeHtml(walk.name)}</name>
+    <time>${date}</time>
+  </metadata>
+  <trk>
+    <name>${escapeHtml(walk.name)}</name>
+    <trkseg>
+${points}
+    </trkseg>
+  </trk>
+</gpx>`;
+  const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (walk.name || 'walk').replace(/[^\w\dа-яА-Я-]+/g, '_') + '.gpx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   БИНДИНГ КНОПОК
+   ═══════════════════════════════════════════════════════════════ */
+function bindGlobal() {
+  document.getElementById('btn-new-walk').addEventListener('click', openSettings);
+
+  document.getElementById('btn-pause').addEventListener('click', () => togglePause());
+  document.getElementById('btn-recenter').addEventListener('click', recenterMap);
+  document.getElementById('btn-finish').addEventListener('click', finishWalk);
+
+  document.getElementById('btn-back-from-view').addEventListener('click', () => {
+    if (state.viewMap) { state.viewMap.remove(); state.viewMap = null; }
+    state.viewingWalk = null;
+    showScreen('screen-home');
+  });
+
+  document.getElementById('btn-export-gpx').addEventListener('click', exportGpx);
+
+  // Кнопка «Назад» в системе — закрыть модалку, или вернуться на home
+  window.addEventListener('popstate', () => {
+    const m = document.getElementById('modal');
+    if (m.classList.contains('show')) m.classList.remove('show');
+  });
+
+  // Аудио-контекст требует жеста пользователя — инициализируем при первом тапе
+  document.addEventListener('click', () => { getAudioCtx(); }, { once: true });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ИНИЦИАЛИЗАЦИЯ
+   ═══════════════════════════════════════════════════════════════ */
+function init() {
+  bindSettings();
+  bindGlobal();
+  renderHistory();
+  showScreen('screen-home');
+}
+
+init();
+</script>
+</body>
+</html>

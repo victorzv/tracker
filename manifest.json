@@ -1,0 +1,20 @@
+{
+  "name": "Интервальная ходьба",
+  "short_name": "Ходьба",
+  "description": "Трекер интервальной ходьбы с голосовыми командами и картой",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
