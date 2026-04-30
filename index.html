@@ -1341,8 +1341,10 @@ function onPositionUpdate(pos) {
   const { latitude: lat, longitude: lon, accuracy, speed: rawSpeed } = pos.coords;
   const t = pos.timestamp || Date.now();
 
-  // Фильтр шума: точность хуже 30м
-  if (accuracy != null && accuracy > 30) return;
+  // ═══ ФИЛЬТР 1: точность ═══
+  // Принимаем только точки с погрешностью ≤ 15 м.
+  // При accuracy > 15 м точка чаще всего "дрейфует" от шума и даёт фантомные метры.
+  if (accuracy == null || accuracy > 15) return;
 
   const walk = state.walk;
   const last = walk.rawTrack.length > 0 ? walk.rawTrack[walk.rawTrack.length - 1] : null;
@@ -1350,18 +1352,36 @@ function onPositionUpdate(pos) {
   if (last) {
     const delta = haversine(last.lat, last.lon, lat, lon);
     const dt = (t - last.t) / 1000;
-
-    // Скорость по координатам
     const speedMs = dt > 0 ? delta / dt : 0;
     const speedKmh = speedMs * 3.6;
 
-    // Фильтр: GPS прыгнул (скорость > 25 км/ч)
+    // ═══ ФИЛЬТР 2: GPS прыгнул ═══
     if (speedKmh > 25) return;
-    // Фильтр: стоим на месте (< 2м)
-    if (delta < 2) return;
 
-    // Сохраняем точку
-    walk.rawTrack.push({ lat, lon, t, speed: rawSpeed != null ? rawSpeed : speedMs });
+    // ═══ ФИЛЬТР 3: динамический минимум движения ═══
+    // Главный приём против накручивания дистанции от шума.
+    // Шум пропорционален погрешности — поэтому требуем, чтобы перемещение
+    // было заметно больше средней погрешности двух точек.
+    // Минимум 5 м, иначе ~70% от средней accuracy.
+    const lastAcc = last.accuracy || accuracy;
+    const minDelta = Math.max(5, 0.7 * (accuracy + lastAcc) / 2);
+    if (delta < minDelta) {
+      // Точка не прошла фильтр — двигаем маркер на карте, но дистанцию НЕ растим
+      state.positionMarker.setLatLng([lat, lon]);
+      if (state.mapCentered) state.map.panTo([lat, lon], { animate: true, duration: 0.5 });
+      return;
+    }
+
+    // ═══ ФИЛЬТР 4: GPS сообщает "стою на месте" ═══
+    // Если устройство видит скорость < 0.3 м/с (≈1 км/ч) — это стояние,
+    // даже если координаты съехали.
+    if (rawSpeed != null && rawSpeed >= 0 && rawSpeed < 0.3) {
+      state.positionMarker.setLatLng([lat, lon]);
+      return;
+    }
+
+    // ═══ Точка прошла все фильтры — засчитываем ═══
+    walk.rawTrack.push({ lat, lon, t, accuracy, speed: rawSpeed != null ? rawSpeed : speedMs });
     walk.stats.totalDistance += delta;
 
     // Интервальный режим
@@ -1381,20 +1401,20 @@ function onPositionUpdate(pos) {
     if (curSpeedKmh > walk.stats.maxSpeed) walk.stats.maxSpeed = curSpeedKmh;
     walk.speedSamples.push([t - state.startTime, curSpeedKmh]);
 
-    // Сохраняем точку в trackOptimized раз в 10 метров
+    // Сохраняем точку в track раз в 10 метров
     if (!walk.lastSavedTrackPoint ||
         haversine(walk.lastSavedTrackPoint.lat, walk.lastSavedTrackPoint.lon, lat, lon) >= 10) {
       walk.track.push([+lat.toFixed(6), +lon.toFixed(6)]);
       walk.lastSavedTrackPoint = { lat, lon };
-      // Обновляем линию на карте
       state.trackPolyline.addLatLng([lat, lon]);
     }
 
-    // UI метрики
     updateMetricsUI(curSpeedKmh);
   } else {
-    // Первая точка
-    walk.rawTrack.push({ lat, lon, t, speed: rawSpeed || 0 });
+    // ═══ Первая точка — принимаем только при высокой точности ═══
+    // Хороший старт критически важен, иначе все последующие расчёты будут смещены
+    if (accuracy > 10) return;
+    walk.rawTrack.push({ lat, lon, t, accuracy, speed: rawSpeed || 0 });
     walk.track.push([+lat.toFixed(6), +lon.toFixed(6)]);
     walk.lastSavedTrackPoint = { lat, lon };
     state.map.setView([lat, lon], 17);
