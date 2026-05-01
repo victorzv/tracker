@@ -1,5 +1,5 @@
 /* Service Worker для PWA "Интервальная ходьба" */
-const CACHE_NAME = 'walk-tracker-v2';
+const CACHE_NAME = 'walk-tracker-v3';
 
 // Ресурсы, которые кешируем при установке
 const CORE_ASSETS = [
