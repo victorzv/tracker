@@ -904,6 +904,13 @@ const state = {
   // GPS
   lastFixTime: 0,
   gpsWarningShown: false,
+  // Сглаживание координат — буфер последних фиксов
+  recentFixes: [],
+  // Акселерометр — детекция реального движения
+  motionListenerActive: false,
+  motionMagBuffer: [],   // последние ~3с показаний акселерометра
+  lastMotionTime: 0,     // когда последний раз зафиксировано значимое движение
+  motionAvailable: false, // есть ли вообще данные с акселерометра
   // Просматриваемая прогулка
   viewingWalk: null
 };
@@ -1248,12 +1255,19 @@ async function startWalk() {
     return;
   }
 
+  // Запрашиваем разрешение на акселерометр СРАЗУ — пока активен жест пользователя
+  // (на iOS 13+ это требование, иначе разрешение просто не запросится)
+  await setupMotionDetection();
+
   state.walk = createWalkObject();
   state.startTime = Date.now();
   state.pausedAccum = 0;
   state.paused = false;
   state.lastFixTime = 0;
   state.gpsWarningShown = false;
+  state.recentFixes = [];
+  state.motionMagBuffer = [];
+  state.lastMotionTime = Date.now(); // в начале считаем, что движемся (warmup)
 
   // Показываем экран
   showScreen('screen-active');
@@ -1331,6 +1345,89 @@ function initActiveMap() {
   });
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   МЕДИАННОЕ СГЛАЖИВАНИЕ КООРДИНАТ
+   Буфер из последних 3 фиксов; используем медиану для расчётов.
+   Это убирает выбросы, не смещая средний путь.
+   ═══════════════════════════════════════════════════════════════ */
+const SMOOTH_WINDOW = 3; // размер окна
+
+function pushAndSmooth(lat, lon, t, accuracy) {
+  state.recentFixes.push({ lat, lon, t, accuracy });
+  if (state.recentFixes.length > SMOOTH_WINDOW) state.recentFixes.shift();
+
+  const fixes = state.recentFixes;
+  if (fixes.length === 1) return { lat, lon, t, accuracy };
+
+  // Медиана раздельно по lat и lon
+  const lats = fixes.map(f => f.lat).slice().sort((a, b) => a - b);
+  const lons = fixes.map(f => f.lon).slice().sort((a, b) => a - b);
+  const mid = Math.floor(lats.length / 2);
+  const medLat = lats.length % 2 === 1 ? lats[mid] : (lats[mid - 1] + lats[mid]) / 2;
+  const medLon = lons.length % 2 === 1 ? lons[mid] : (lons[mid - 1] + lons[mid]) / 2;
+
+  return { lat: medLat, lon: medLon, t, accuracy };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   АКСЕЛЕРОМЕТР — детекция реальной ходьбы
+   Если телефон в покое (нет тряски от шагов), GPS-движение игнорируем.
+   ═══════════════════════════════════════════════════════════════ */
+async function setupMotionDetection() {
+  // На iOS 13+ нужен запрос разрешения через жест пользователя
+  if (typeof DeviceMotionEvent !== 'undefined' &&
+      typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const res = await DeviceMotionEvent.requestPermission();
+      if (res !== 'granted') {
+        state.motionAvailable = false;
+        return;
+      }
+    } catch (e) {
+      state.motionAvailable = false;
+      return;
+    }
+  }
+  if (!('DeviceMotionEvent' in window)) {
+    state.motionAvailable = false;
+    return;
+  }
+  window.addEventListener('devicemotion', onDeviceMotion);
+  state.motionListenerActive = true;
+  state.motionAvailable = true;
+}
+
+function onDeviceMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null) return;
+  // Магнитуда минус приблизительная сила тяжести (≈9.81 м/с²)
+  const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+  const dynamic = Math.abs(mag - 9.81);
+
+  const now = Date.now();
+  state.motionMagBuffer.push({ t: now, m: dynamic });
+  // Храним только последние 3 секунды
+  const cutoff = now - 3000;
+  while (state.motionMagBuffer.length > 0 && state.motionMagBuffer[0].t < cutoff) {
+    state.motionMagBuffer.shift();
+  }
+
+  // Шаги при ходьбе дают пиковые ~0.5–2 м/с². Достаточно средней > 0.4
+  if (state.motionMagBuffer.length > 4) {
+    const avg = state.motionMagBuffer.reduce((s, x) => s + x.m, 0) / state.motionMagBuffer.length;
+    if (avg > 0.4) state.lastMotionTime = now;
+  }
+}
+
+function isUserMoving() {
+  // Если данных с акселерометра нет — не отсекаем (default: true)
+  if (!state.motionAvailable || !state.motionListenerActive) return true;
+  // Если буфер ещё не собран — тоже не отсекаем
+  if (state.motionMagBuffer.length < 5) return true;
+  // Считаем "идём", если значимое движение было в последние 4 секунды
+  return Date.now() - state.lastMotionTime < 4000;
+}
+
 /* Обновление позиции — главная функция */
 function onPositionUpdate(pos) {
   if (state.paused) return;
@@ -1338,13 +1435,21 @@ function onPositionUpdate(pos) {
   state.lastFixTime = Date.now();
   hideGpsWarning();
 
-  const { latitude: lat, longitude: lon, accuracy, speed: rawSpeed } = pos.coords;
+  const { latitude: rawLat, longitude: rawLon, accuracy, speed: rawSpeed } = pos.coords;
   const t = pos.timestamp || Date.now();
 
   // ═══ ФИЛЬТР 1: точность ═══
   // Принимаем только точки с погрешностью ≤ 15 м.
   // При accuracy > 15 м точка чаще всего "дрейфует" от шума и даёт фантомные метры.
   if (accuracy == null || accuracy > 15) return;
+
+  // ═══ ФИЛЬТР 2: акселерометр говорит "стоим" ═══
+  // Если телефон неподвижен 4+ секунд — это GPS-шум, а не реальная ходьба
+  if (!isUserMoving()) return;
+
+  // ═══ Сглаживание координат — медиана по последним 3 фиксам ═══
+  const smoothed = pushAndSmooth(rawLat, rawLon, t, accuracy);
+  const lat = smoothed.lat, lon = smoothed.lon;
 
   const walk = state.walk;
   const last = walk.rawTrack.length > 0 ? walk.rawTrack[walk.rawTrack.length - 1] : null;
@@ -1355,26 +1460,22 @@ function onPositionUpdate(pos) {
     const speedMs = dt > 0 ? delta / dt : 0;
     const speedKmh = speedMs * 3.6;
 
-    // ═══ ФИЛЬТР 2: GPS прыгнул ═══
+    // ═══ ФИЛЬТР 3: GPS прыгнул ═══
     if (speedKmh > 25) return;
 
-    // ═══ ФИЛЬТР 3: динамический минимум движения ═══
-    // Главный приём против накручивания дистанции от шума.
-    // Шум пропорционален погрешности — поэтому требуем, чтобы перемещение
+    // ═══ ФИЛЬТР 4: динамический минимум движения ═══
+    // Шум пропорционален погрешности — требуем, чтобы перемещение
     // было заметно больше средней погрешности двух точек.
-    // Минимум 5 м, иначе ~70% от средней accuracy.
     const lastAcc = last.accuracy || accuracy;
     const minDelta = Math.max(5, 0.7 * (accuracy + lastAcc) / 2);
     if (delta < minDelta) {
-      // Точка не прошла фильтр — двигаем маркер на карте, но дистанцию НЕ растим
+      // Маркер двигаем, но дистанцию НЕ растим
       state.positionMarker.setLatLng([lat, lon]);
       if (state.mapCentered) state.map.panTo([lat, lon], { animate: true, duration: 0.5 });
       return;
     }
 
-    // ═══ ФИЛЬТР 4: GPS сообщает "стою на месте" ═══
-    // Если устройство видит скорость < 0.3 м/с (≈1 км/ч) — это стояние,
-    // даже если координаты съехали.
+    // ═══ ФИЛЬТР 5: GPS сообщает "стою на месте" ═══
     if (rawSpeed != null && rawSpeed >= 0 && rawSpeed < 0.3) {
       state.positionMarker.setLatLng([lat, lon]);
       return;
@@ -1412,7 +1513,6 @@ function onPositionUpdate(pos) {
     updateMetricsUI(curSpeedKmh);
   } else {
     // ═══ Первая точка — принимаем только при высокой точности ═══
-    // Хороший старт критически важен, иначе все последующие расчёты будут смещены
     if (accuracy > 10) return;
     walk.rawTrack.push({ lat, lon, t, accuracy, speed: rawSpeed || 0 });
     walk.track.push([+lat.toFixed(6), +lon.toFixed(6)]);
@@ -1693,6 +1793,14 @@ function cleanupActiveWalk() {
   }
   if (state.timerInterval) { clearInterval(state.timerInterval); state.timerInterval = null; }
   if (state.gpsCheckInterval) { clearInterval(state.gpsCheckInterval); state.gpsCheckInterval = null; }
+  // Снимаем слушатель акселерометра
+  if (state.motionListenerActive) {
+    window.removeEventListener('devicemotion', onDeviceMotion);
+    state.motionListenerActive = false;
+  }
+  state.recentFixes = [];
+  state.motionMagBuffer = [];
+  state.lastMotionTime = 0;
   releaseWakeLock();
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   state.walk = null;
