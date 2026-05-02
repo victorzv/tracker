@@ -393,6 +393,39 @@ input, select { font-family: inherit; }
 }
 .gps-warning.show { display: block; }
 
+/* Бейдж качества GPS — слева сверху на карте */
+.gps-quality {
+  position: absolute;
+  top: 12px; left: 12px;
+  z-index: 401;
+  background: rgba(20,20,20,0.92);
+  color: #f5f5f5;
+  padding: 6px 10px 6px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'Space Mono', monospace;
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid #2a2a2a;
+  backdrop-filter: blur(8px);
+}
+.gps-quality-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #ff6b6b;
+  transition: background .3s ease;
+}
+.gps-quality.good .gps-quality-dot { background: #ffaa00; }
+.gps-quality.excellent .gps-quality-dot { background: #00ff87; }
+.gps-quality.searching .gps-quality-dot {
+  background: #888;
+  animation: gpsBlink 1s ease-in-out infinite;
+}
+@keyframes gpsBlink {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
 .active-stats {
   flex: 1;
   background: #0a0a0a;
@@ -769,6 +802,10 @@ input, select { font-family: inherit; }
   <div class="active-map">
     <div id="map-active"></div>
     <div class="gps-warning" id="gps-warning">Нет GPS сигнала — ставлю на паузу…</div>
+    <div class="gps-quality" id="gps-quality">
+      <span class="gps-quality-dot"></span>
+      <span id="gps-quality-text">Поиск GPS…</span>
+    </div>
     <button class="map-recenter" id="btn-recenter" title="Центрировать карту">⊕</button>
   </div>
   <div class="active-stats">
@@ -906,6 +943,8 @@ const state = {
   gpsWarningShown: false,
   // Сглаживание координат — буфер последних фиксов
   recentFixes: [],
+  // Получен ли первый GPS-фикс (для центрирования карты)
+  firstFixReceived: false,
   // Акселерометр — детекция реального движения
   motionListenerActive: false,
   motionMagBuffer: [],   // последние ~3с показаний акселерометра
@@ -1265,9 +1304,13 @@ async function startWalk() {
   state.paused = false;
   state.lastFixTime = 0;
   state.gpsWarningShown = false;
+  state.firstFixReceived = false;
   state.recentFixes = [];
   state.motionMagBuffer = [];
   state.lastMotionTime = Date.now(); // в начале считаем, что движемся (warmup)
+
+  // Сбрасываем бейдж GPS на "поиск"
+  updateAccuracyBadge(null);
 
   // Показываем экран
   showScreen('screen-active');
@@ -1288,7 +1331,23 @@ async function startWalk() {
   // Wake Lock — не даём экрану гаснуть
   await acquireWakeLock();
 
-  // Запускаем геолокацию
+  // Быстрый "грубый" первый фикс — мгновенно центрируем карту,
+  // даже если кешированная сетевая локация не очень точная.
+  // Это то, что делает Google Maps — показывает позицию сразу.
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      if (state.firstFixReceived) return; // если точный фикс уже пришёл — не мешаем
+      const { latitude, longitude, accuracy } = pos.coords;
+      state.positionMarker.setLatLng([latitude, longitude]);
+      state.map.setView([latitude, longitude], 16);
+      updateAccuracyBadge(accuracy);
+      // НЕ ставим firstFixReceived = true — пусть точный watchPosition обновит карту
+    },
+    () => {}, // ошибки игнорируем — точный watch всё равно работает
+    { enableHighAccuracy: false, maximumAge: 60000, timeout: 5000 }
+  );
+
+  // Запускаем точную геолокацию
   state.watchId = navigator.geolocation.watchPosition(
     onPositionUpdate,
     onPositionError,
@@ -1428,6 +1487,32 @@ function isUserMoving() {
   return Date.now() - state.lastMotionTime < 4000;
 }
 
+/* Бейдж качества GPS — показывает текущую погрешность и цвет статуса */
+function updateAccuracyBadge(accuracy) {
+  const el = document.getElementById('gps-quality');
+  const text = document.getElementById('gps-quality-text');
+  if (!el || !text) return;
+  if (accuracy == null) {
+    el.className = 'gps-quality searching';
+    text.textContent = 'Поиск GPS…';
+    return;
+  }
+  const a = Math.round(accuracy);
+  text.textContent = `GPS ±${a} м`;
+  // Цвет: зелёный — отличный (засчитывается дистанция),
+  // жёлтый — окей (но дистанция не считается),
+  // красный — плохой
+  if (accuracy <= 10) {
+    el.className = 'gps-quality excellent';
+  } else if (accuracy <= 15) {
+    el.className = 'gps-quality excellent'; // на границе — тоже зелёный
+  } else if (accuracy <= 30) {
+    el.className = 'gps-quality good';
+  } else {
+    el.className = 'gps-quality';
+  }
+}
+
 /* Обновление позиции — главная функция */
 function onPositionUpdate(pos) {
   if (state.paused) return;
@@ -1438,13 +1523,28 @@ function onPositionUpdate(pos) {
   const { latitude: rawLat, longitude: rawLon, accuracy, speed: rawSpeed } = pos.coords;
   const t = pos.timestamp || Date.now();
 
+  // ═══ ВСЕГДА обновляем карту — как Google Maps, независимо от фильтров ═══
+  // Пользователь должен видеть свою позицию сразу, даже если точность пока плохая.
+  // Фильтры применяются только к подсчёту дистанции, не к отображению.
+  state.positionMarker.setLatLng([rawLat, rawLon]);
+  if (!state.firstFixReceived) {
+    state.firstFixReceived = true;
+    state.map.setView([rawLat, rawLon], 17);
+  } else if (state.mapCentered) {
+    state.map.panTo([rawLat, rawLon], { animate: true, duration: 0.5 });
+  }
+
+  // Бейдж качества GPS
+  updateAccuracyBadge(accuracy);
+
+  // ═══════════════════════════════════════════════════════════════
+  // ДАЛЬШЕ — фильтры ТОЛЬКО для счёта дистанции
+  // ═══════════════════════════════════════════════════════════════
+
   // ═══ ФИЛЬТР 1: точность ═══
-  // Принимаем только точки с погрешностью ≤ 15 м.
-  // При accuracy > 15 м точка чаще всего "дрейфует" от шума и даёт фантомные метры.
   if (accuracy == null || accuracy > 15) return;
 
   // ═══ ФИЛЬТР 2: акселерометр говорит "стоим" ═══
-  // Если телефон неподвижен 4+ секунд — это GPS-шум, а не реальная ходьба
   if (!isUserMoving()) return;
 
   // ═══ Сглаживание координат — медиана по последним 3 фиксам ═══
@@ -1468,18 +1568,10 @@ function onPositionUpdate(pos) {
     // было заметно больше средней погрешности двух точек.
     const lastAcc = last.accuracy || accuracy;
     const minDelta = Math.max(5, 0.7 * (accuracy + lastAcc) / 2);
-    if (delta < minDelta) {
-      // Маркер двигаем, но дистанцию НЕ растим
-      state.positionMarker.setLatLng([lat, lon]);
-      if (state.mapCentered) state.map.panTo([lat, lon], { animate: true, duration: 0.5 });
-      return;
-    }
+    if (delta < minDelta) return;
 
     // ═══ ФИЛЬТР 5: GPS сообщает "стою на месте" ═══
-    if (rawSpeed != null && rawSpeed >= 0 && rawSpeed < 0.3) {
-      state.positionMarker.setLatLng([lat, lon]);
-      return;
-    }
+    if (rawSpeed != null && rawSpeed >= 0 && rawSpeed < 0.3) return;
 
     // ═══ Точка прошла все фильтры — засчитываем ═══
     walk.rawTrack.push({ lat, lon, t, accuracy, speed: rawSpeed != null ? rawSpeed : speedMs });
@@ -1512,18 +1604,12 @@ function onPositionUpdate(pos) {
 
     updateMetricsUI(curSpeedKmh);
   } else {
-    // ═══ Первая точка — принимаем только при высокой точности ═══
-    if (accuracy > 10) return;
+    // ═══ Первая точка трека — принимаем только при хорошей точности ═══
+    // (карта уже отцентрирована выше, тут только начало записи дистанции)
+    if (accuracy > 12) return;
     walk.rawTrack.push({ lat, lon, t, accuracy, speed: rawSpeed || 0 });
     walk.track.push([+lat.toFixed(6), +lon.toFixed(6)]);
     walk.lastSavedTrackPoint = { lat, lon };
-    state.map.setView([lat, lon], 17);
-  }
-
-  // Маркер и центр
-  state.positionMarker.setLatLng([lat, lon]);
-  if (state.mapCentered) {
-    state.map.panTo([lat, lon], { animate: true, duration: 0.5 });
   }
 }
 
